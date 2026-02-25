@@ -1,0 +1,438 @@
+// KlaimSwift Insurance Claims System — Full Prisma Schema
+// Database: PostgreSQL
+// ORM: Prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ──────────────────────────────────────────────
+
+enum Role {
+  POLICYHOLDER
+  CLAIMS_ADJUSTER
+  FRAUD_ANALYST
+  ACTUARY
+  ADMIN
+  REGULATOR
+}
+
+enum PolicyType {
+  MEDICAL
+  MOTOR
+  PROPERTY
+  LIFE
+  ACCIDENT
+}
+
+enum PolicyStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  SUSPENDED
+}
+
+enum ClaimType {
+  MEDICAL
+  MOTOR
+  PROPERTY
+  LIFE
+  ACCIDENT
+}
+
+enum ClaimStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  FRAUD_CHECK
+  APPROVED
+  REJECTED
+  INVESTIGATION
+  PAYMENT_PENDING
+  SETTLED
+  DISPUTED
+  CLOSED
+  ARCHIVED
+}
+
+enum ClaimChannel {
+  WEB
+  MOBILE
+  WHATSAPP
+  USSD
+}
+
+enum OcrStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum RiskLevel {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum PaymentMethod {
+  MPESA
+  BANK_TRANSFER
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+enum NotificationType {
+  SMS
+  EMAIL
+  WHATSAPP
+  PUSH
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+enum WebhookProvider {
+  MPESA
+  WHATSAPP
+  AFRICAS_TALKING
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+}
+
+// ─── MODELS ─────────────────────────────────────────────
+
+model Tenant {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(255)
+  code      String   @unique @db.VarChar(50)
+  isActive  Boolean  @default(true)
+  config    Json?    @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users              User[]
+  policies           Policy[]
+  claims             Claim[]
+  payments           Payment[]
+  auditLogs          AuditLog[]
+  ledgerEntries      LedgerEntry[]
+  notifications      Notification[]
+  actuarialMetrics   ActuarialMetrics[]
+  integrationWebhooks IntegrationWebhook[]
+
+  @@map("tenants")
+}
+
+model User {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  email            String    @db.VarChar(255)
+  phone            String    @db.VarChar(20)
+  nationalId       String?   @map("national_id") @db.VarChar(50)
+  passwordHash     String    @map("password_hash") @db.VarChar(255)
+  firstName        String    @map("first_name") @db.VarChar(100)
+  lastName         String    @map("last_name") @db.VarChar(100)
+  dateOfBirth      DateTime? @map("date_of_birth") @db.Date
+  role             Role      @default(POLICYHOLDER)
+  isActive         Boolean   @default(true) @map("is_active")
+  refreshTokenHash String?   @map("refresh_token_hash") @db.VarChar(255)
+  resetTokenHash   String?   @map("reset_token_hash") @db.VarChar(255)
+  resetTokenExpiry DateTime? @map("reset_token_expiry")
+  lastLoginAt      DateTime? @map("last_login_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id])
+  policies           Policy[]
+  claimsAsClaimant   Claim[]             @relation("ClaimantClaims")
+  claimsAsAdjuster   Claim[]             @relation("AdjusterClaims")
+  claimDocuments     ClaimDocument[]
+  statusChanges      ClaimStatusHistory[]
+  fraudOverrides     FraudScore[]        @relation("FraudOverrides")
+  paymentsReceived   Payment[]
+  auditLogs          AuditLog[]
+  notifications      Notification[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId, role])
+  @@index([tenantId, isActive])
+  @@index([phone])
+  @@map("users")
+}
+
+model Policy {
+  id             String       @id @default(uuid()) @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  userId         String       @map("user_id") @db.Uuid
+  policyNumber   String       @unique @map("policy_number") @db.VarChar(50)
+  type           PolicyType
+  coverageAmount Decimal      @map("coverage_amount") @db.Decimal(15, 2)
+  premiumAmount  Decimal      @map("premium_amount") @db.Decimal(15, 2)
+  startDate      DateTime     @map("start_date") @db.Date
+  endDate        DateTime     @map("end_date") @db.Date
+  status         PolicyStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  deletedAt      DateTime?    @map("deleted_at")
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id])
+  user   User    @relation(fields: [userId], references: [id])
+  claims Claim[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, userId])
+  @@index([policyNumber])
+  @@map("policies")
+}
+
+model Claim {
+  id                 String      @id @default(uuid()) @db.Uuid
+  tenantId           String      @map("tenant_id") @db.Uuid
+  policyId           String      @map("policy_id") @db.Uuid
+  claimantId         String      @map("claimant_id") @db.Uuid
+  claimNumber        String      @unique @map("claim_number") @db.VarChar(30)
+  type               ClaimType
+  status             ClaimStatus @default(DRAFT)
+  description        String      @db.Text
+  incidentDate       DateTime    @map("incident_date") @db.Date
+  claimAmount        Decimal     @map("claim_amount") @db.Decimal(15, 2)
+  approvedAmount     Decimal?    @map("approved_amount") @db.Decimal(15, 2)
+  channel            ClaimChannel @default(WEB)
+  assignedAdjusterId String?     @map("assigned_adjuster_id") @db.Uuid
+  processingDays     Int?        @map("processing_days")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+  deletedAt          DateTime?   @map("deleted_at")
+
+  tenant          Tenant               @relation(fields: [tenantId], references: [id])
+  policy          Policy               @relation(fields: [policyId], references: [id])
+  claimant        User                 @relation("ClaimantClaims", fields: [claimantId], references: [id])
+  assignedAdjuster User?               @relation("AdjusterClaims", fields: [assignedAdjusterId], references: [id])
+  documents       ClaimDocument[]
+  statusHistory   ClaimStatusHistory[]
+  fraudScore      FraudScore?
+  payments        Payment[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, claimantId])
+  @@index([tenantId, assignedAdjusterId])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, type, status])
+  @@index([claimNumber])
+  @@map("claims")
+}
+
+model ClaimDocument {
+  id            String    @id @default(uuid()) @db.Uuid
+  claimId       String    @map("claim_id") @db.Uuid
+  fileName      String    @map("file_name") @db.VarChar(255)
+  fileType      String    @map("file_type") @db.VarChar(100)
+  fileSizeBytes Int       @map("file_size_bytes")
+  storageKey    String    @map("storage_key") @db.VarChar(500)
+  ocrStatus     OcrStatus @default(PENDING) @map("ocr_status")
+  ocrResult     Json?     @map("ocr_result")
+  uploadedById  String    @map("uploaded_by_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  claim      Claim @relation(fields: [claimId], references: [id])
+  uploadedBy User  @relation(fields: [uploadedById], references: [id])
+
+  @@index([claimId])
+  @@index([ocrStatus])
+  @@map("claim_documents")
+}
+
+model ClaimStatusHistory {
+  id          String      @id @default(uuid()) @db.Uuid
+  claimId     String      @map("claim_id") @db.Uuid
+  fromStatus  ClaimStatus? @map("from_status")
+  toStatus    ClaimStatus  @map("to_status")
+  changedById String      @map("changed_by_id") @db.Uuid
+  reason      String?     @db.Text
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  claim     Claim @relation(fields: [claimId], references: [id])
+  changedBy User  @relation(fields: [changedById], references: [id])
+
+  @@index([claimId, createdAt])
+  @@map("claim_status_history")
+}
+
+model FraudScore {
+  id             String    @id @default(uuid()) @db.Uuid
+  claimId        String    @unique @map("claim_id") @db.Uuid
+  overallScore   Int       @map("overall_score") @db.SmallInt
+  riskLevel      RiskLevel @map("risk_level")
+  factors        Json
+  velocityScore  Int       @map("velocity_score") @db.SmallInt
+  patternScore   Int       @map("pattern_score") @db.SmallInt
+  amountScore    Int       @map("amount_score") @db.SmallInt
+  isOverridden   Boolean   @default(false) @map("is_overridden")
+  overriddenById String?   @map("overridden_by_id") @db.Uuid
+  overrideReason String?   @map("override_reason") @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  claim        Claim @relation(fields: [claimId], references: [id])
+  overriddenBy User? @relation("FraudOverrides", fields: [overriddenById], references: [id])
+
+  @@index([riskLevel])
+  @@index([overallScore])
+  @@map("fraud_scores")
+}
+
+model Payment {
+  id                 String        @id @default(uuid()) @db.Uuid
+  tenantId           String        @map("tenant_id") @db.Uuid
+  claimId            String        @map("claim_id") @db.Uuid
+  payeeId            String        @map("payee_id") @db.Uuid
+  amount             Decimal       @db.Decimal(15, 2)
+  currency           String        @default("KES") @db.VarChar(3)
+  method             PaymentMethod @default(MPESA)
+  mpesaTransactionId String?       @map("mpesa_transaction_id") @db.VarChar(100)
+  mpesaReceiptNumber String?       @map("mpesa_receipt_number") @db.VarChar(50)
+  status             PaymentStatus @default(PENDING)
+  idempotencyKey     String        @unique @map("idempotency_key") @db.VarChar(255)
+  paidAt             DateTime?     @map("paid_at")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  claim  Claim  @relation(fields: [claimId], references: [id])
+  payee  User   @relation(fields: [payeeId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([claimId])
+  @@index([mpesaTransactionId])
+  @@index([idempotencyKey])
+  @@map("payments")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  action     String   @db.VarChar(100)
+  entityType String   @map("entity_type") @db.VarChar(50)
+  entityId   String   @map("entity_id") @db.Uuid
+  oldValue   Json?    @map("old_value")
+  newValue   Json?    @map("new_value")
+  ipAddress  String?  @map("ip_address") @db.VarChar(45)
+  userAgent  String?  @map("user_agent") @db.VarChar(500)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, action])
+  @@index([tenantId, createdAt])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+model LedgerEntry {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  sequenceNumber Int      @map("sequence_number")
+  eventType      String   @map("event_type") @db.VarChar(100)
+  entityType     String   @map("entity_type") @db.VarChar(50)
+  entityId       String   @map("entity_id") @db.Uuid
+  payload        Json
+  previousHash   String   @map("previous_hash") @db.VarChar(64)
+  currentHash    String   @map("current_hash") @db.VarChar(64)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, sequenceNumber])
+  @@index([tenantId, createdAt])
+  @@index([entityType, entityId])
+  @@map("ledger_entries")
+}
+
+model Notification {
+  id        String             @id @default(uuid()) @db.Uuid
+  tenantId  String             @map("tenant_id") @db.Uuid
+  userId    String             @map("user_id") @db.Uuid
+  type      NotificationType
+  title     String             @db.VarChar(255)
+  body      String             @db.Text
+  status    NotificationStatus @default(PENDING)
+  sentAt    DateTime?          @map("sent_at")
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, userId, status])
+  @@index([status])
+  @@map("notifications")
+}
+
+model ActuarialMetrics {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  periodStart     DateTime  @map("period_start") @db.Date
+  periodEnd       DateTime  @map("period_end") @db.Date
+  claimType       ClaimType @map("claim_type")
+  totalClaims     Int       @map("total_claims")
+  totalAmount     Decimal   @map("total_amount") @db.Decimal(18, 2)
+  averageSeverity Decimal   @map("average_severity") @db.Decimal(15, 2)
+  claimFrequency  Decimal   @map("claim_frequency") @db.Decimal(10, 6)
+  lossRatio       Decimal   @map("loss_ratio") @db.Decimal(10, 6)
+  reserveEstimate Decimal   @map("reserve_estimate") @db.Decimal(18, 2)
+  fraudRate       Decimal   @map("fraud_rate") @db.Decimal(10, 6)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, periodStart, periodEnd, claimType])
+  @@index([tenantId, claimType])
+  @@map("actuarial_metrics")
+}
+
+model IntegrationWebhook {
+  id             String        @id @default(uuid()) @db.Uuid
+  tenantId       String        @map("tenant_id") @db.Uuid
+  provider       WebhookProvider
+  eventType      String        @map("event_type") @db.VarChar(100)
+  payload        Json
+  status         WebhookStatus @default(RECEIVED)
+  processedAt    DateTime?     @map("processed_at")
+  errorMessage   String?       @map("error_message") @db.Text
+  idempotencyKey String        @unique @map("idempotency_key") @db.VarChar(255)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, provider, status])
+  @@index([idempotencyKey])
+  @@map("integration_webhooks")
+}
