@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
     MessageCircle, Phone, Upload, Hash, User, Mail,
     Calendar, MapPin, Shield, Smartphone, Send, FileText,
@@ -273,6 +273,8 @@ export default function KlaimSwiftPage() {
     });
     const [submitting, setSubmitting] = useState(false);
     const [success, setSuccess] = useState(false);
+    const [registeredPolicy, setRegisteredPolicy] = useState('');
+    const [regError, setRegError] = useState('');
 
     /* Submit Claim state */
     const [selectedPolicy, setSelectedPolicy] = useState('');
@@ -284,6 +286,8 @@ export default function KlaimSwiftPage() {
     const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
     const [showDescModal, setShowDescModal] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [dbMembers, setDbMembers] = useState<{ id: string; full_name: string; policy_number: string; phone: string; email: string; whatsapp_number: string; id_number: string }[]>([]);
+    const [searchingMembers, setSearchingMembers] = useState(false);
 
     /* M-Pesa state */
     const [mpesaPhone, setMpesaPhone] = useState('');
@@ -293,10 +297,31 @@ export default function KlaimSwiftPage() {
     const [formulaSubTab, setFormulaSubTab] = useState('Premium');
 
     const todayStr = new Date().toISOString().split('T')[0];
-    const filteredMembers = MEMBERS.filter((m) =>
-        m.id.toLowerCase().includes(policySearch.toLowerCase()) ||
-        m.name.toLowerCase().includes(policySearch.toLowerCase())
-    );
+
+    /* Debounced API search for members */
+    const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const searchMembers = useCallback((query: string) => {
+        if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+        if (query.length < 2) { setDbMembers([]); return; }
+        setSearchingMembers(true);
+        searchTimeoutRef.current = setTimeout(async () => {
+            try {
+                const res = await fetch(`/api/members?q=${encodeURIComponent(query)}`);
+                const data = await res.json();
+                setDbMembers(data.members || []);
+            } catch { setDbMembers([]); }
+            setSearchingMembers(false);
+        }, 300);
+    }, []);
+
+    useEffect(() => { searchMembers(policySearch); }, [policySearch, searchMembers]);
+
+    const filteredMembers = dbMembers.length > 0
+        ? dbMembers.map(m => ({ id: m.policy_number, name: m.full_name, tier: 'standard', phone: m.phone, whatsapp: m.whatsapp_number || m.phone, email: m.email, coverage: 'standard', amount: 18500 }))
+        : MEMBERS.filter((m) =>
+            m.id.toLowerCase().includes(policySearch.toLowerCase()) ||
+            m.name.toLowerCase().includes(policySearch.toLowerCase())
+        );
 
     function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
         if (e.target.files) setUploadedFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
@@ -320,7 +345,7 @@ export default function KlaimSwiftPage() {
         window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
     }
 
-    const selectedMember = MEMBERS.find((m) => m.id === selectedPolicy);
+    const selectedMember = filteredMembers.find((m) => m.id === selectedPolicy) || MEMBERS.find((m) => m.id === selectedPolicy);
 
     function upd(k: string, v: string) {
         setForm((p) => ({ ...p, [k]: v }));
@@ -333,8 +358,30 @@ export default function KlaimSwiftPage() {
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
         setSubmitting(true);
-        await new Promise((r) => setTimeout(r, 1500));
-        setSuccess(true);
+        setRegError('');
+        try {
+            const res = await fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fullName: form.fullName,
+                    idNumber: form.idNumber,
+                    phone: form.phone,
+                    email: form.email,
+                    whatsappNumber: form.whatsapp || form.phone,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setRegisteredPolicy(data.policyNumber);
+                setSuccess(true);
+            } else {
+                setRegError(data.error || 'Registration failed');
+                if (data.policyNumber) setRegisteredPolicy(data.policyNumber);
+            }
+        } catch {
+            setRegError('Network error. Please try again.');
+        }
         setSubmitting(false);
     }
 
@@ -594,11 +641,17 @@ export default function KlaimSwiftPage() {
                                     <CheckCircle size={32} color="#12C15F" />
                                 </div>
                                 <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Registration Successful!</h3>
+                                {registeredPolicy && (
+                                    <div style={{ background: '#E8FBF0', border: '2px solid #12C15F', borderRadius: 12, padding: '16px 24px', marginBottom: 16, display: 'inline-block' }}>
+                                        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>Your Policy Number</div>
+                                        <div style={{ fontSize: 28, fontWeight: 800, color: '#12C15F', letterSpacing: 2 }}>{registeredPolicy}</div>
+                                    </div>
+                                )}
                                 <p style={{ fontSize: 14, color: '#6B7280', marginBottom: 24 }}>
-                                    Your policy has been issued. Check your WhatsApp for claim submission instructions.
+                                    Save your policy number. You can use it to submit claims via WhatsApp or the Submit Claim tab.
                                 </p>
                                 <button
-                                    onClick={() => setSuccess(false)}
+                                    onClick={() => { setSuccess(false); setRegisteredPolicy(''); setForm({ fullName: '', idNumber: '', phone: '', whatsapp: '', email: '', dob: '', area: '', coverageType: 'Standard (KES 1,000,000 cover)' }); }}
                                     style={{ padding: '12px 28px', borderRadius: 12, border: 'none', background: '#12C15F', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
                                 >
                                     Register Another Member
@@ -606,6 +659,12 @@ export default function KlaimSwiftPage() {
                             </div>
                         ) : (
                             <form onSubmit={handleSubmit}>
+                                {regError && (
+                                    <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 10, padding: '12px 16px', marginBottom: 16, color: '#DC2626', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        ⚠️ {regError}
+                                        {registeredPolicy && <span style={{ fontWeight: 700 }}> (Policy: {registeredPolicy})</span>}
+                                    </div>
+                                )}
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px 24px' }}>
                                     {/* Reuse Existing Form Fields */}
                                     <div>
