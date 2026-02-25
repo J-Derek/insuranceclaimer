@@ -288,6 +288,7 @@ export default function KlaimSwiftPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [dbMembers, setDbMembers] = useState<{ id: string; full_name: string; policy_number: string; phone: string; email: string; whatsapp_number: string; id_number: string }[]>([]);
     const [searchingMembers, setSearchingMembers] = useState(false);
+    const [selectedMemberData, setSelectedMemberData] = useState<{ id: string; name: string; tier: string; phone: string; whatsapp: string; email: string; coverage: string; amount: number } | null>(null);
 
     /* M-Pesa state */
     const [mpesaPhone, setMpesaPhone] = useState('');
@@ -330,11 +331,11 @@ export default function KlaimSwiftPage() {
         setUploadedFiles((prev) => prev.filter((_, i) => i !== idx));
     }
     function handleClaimSubmit() {
-        if (!selectedMember) return;
+        if (!selectedMemberData) return;
         const msg = [
             `*NEW CLAIM - KlaimSwift*`,
-            `Policy: ${selectedMember.id}`,
-            `Member: ${selectedMember.name}`,
+            `Policy: ${selectedMemberData.id}`,
+            `Member: ${selectedMemberData.name}`,
             `Type: ${claimForm.claimType || 'N/A'}`,
             `Amount: KES ${claimForm.claimAmount || '0'}`,
             `Date: ${claimForm.incidentDate || 'N/A'}`,
@@ -345,7 +346,7 @@ export default function KlaimSwiftPage() {
         window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
     }
 
-    const selectedMember = filteredMembers.find((m) => m.id === selectedPolicy) || MEMBERS.find((m) => m.id === selectedPolicy);
+
 
     function upd(k: string, v: string) {
         setForm((p) => ({ ...p, [k]: v }));
@@ -804,7 +805,12 @@ export default function KlaimSwiftPage() {
                                         {filteredMembers.length > 0 ? filteredMembers.map((m) => (
                                             <div
                                                 key={m.id}
-                                                onClick={() => { setSelectedPolicy(m.id); setPolicySearch(`${m.id} · ${m.name}`); setPolicyDropdownOpen(false); }}
+                                                onClick={() => {
+                                                    setSelectedPolicy(m.id);
+                                                    setPolicySearch(`${m.id} · ${m.name}`);
+                                                    setPolicyDropdownOpen(false);
+                                                    setSelectedMemberData(m);
+                                                }}
                                                 style={{
                                                     padding: '12px 16px', cursor: 'pointer', fontSize: 14,
                                                     borderBottom: '1px solid #F3F4F6',
@@ -824,7 +830,7 @@ export default function KlaimSwiftPage() {
                             </div>
 
                             {/* Conditional full form — only when policy is selected */}
-                            {selectedMember && (
+                            {selectedMemberData && (
                                 <div style={{ marginTop: 24 }}>
                                     {/* WhatsApp-Linked Account card */}
                                     <div style={{
@@ -840,19 +846,19 @@ export default function KlaimSwiftPage() {
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 32px', fontSize: 13 }}>
                                             <div>
                                                 <span style={{ color: '#6B7280' }}>WhatsApp: </span>
-                                                <span style={{ color: '#3B82F6', fontWeight: 600 }}>{selectedMember.whatsapp}</span>
+                                                <span style={{ color: '#3B82F6', fontWeight: 600 }}>{selectedMemberData.whatsapp}</span>
                                             </div>
                                             <div>
                                                 <span style={{ color: '#6B7280' }}>Phone: </span>
-                                                <span style={{ fontWeight: 600 }}>{selectedMember.phone}</span>
+                                                <span style={{ fontWeight: 600 }}>{selectedMemberData.phone}</span>
                                             </div>
                                             <div>
                                                 <span style={{ color: '#6B7280' }}>Email: </span>
-                                                <span style={{ color: '#3B82F6', fontWeight: 600 }}>{selectedMember.email}</span>
+                                                <span style={{ color: '#3B82F6', fontWeight: 600 }}>{selectedMemberData.email}</span>
                                             </div>
                                             <div>
                                                 <span style={{ color: '#6B7280' }}>Coverage: </span>
-                                                <span style={{ fontWeight: 600 }}>{selectedMember.coverage}</span>
+                                                <span style={{ fontWeight: 600 }}>{selectedMemberData.coverage}</span>
                                             </div>
                                         </div>
                                     </div>
@@ -868,7 +874,7 @@ export default function KlaimSwiftPage() {
                                                 <option value="sms">SMS</option>
                                             </select>
                                         </div>
-                                        <div style={{ ...S.hint, color: '#3B82F6' }}>Claim notification will be sent to {selectedMember.whatsapp}</div>
+                                        <div style={{ ...S.hint, color: '#3B82F6' }}>Claim notification will be sent to {selectedMemberData.whatsapp}</div>
                                     </div>
 
                                     {/* Claim Type + Amount row */}
