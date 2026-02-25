@@ -1007,7 +1007,7 @@ export default function KlaimSwiftPage() {
                                             <li>Claims are processed within 2-3 working days (Target 87% efficiency)</li>
                                             <li>Automatic fraud detection system screens all claims</li>
                                             <li>Track your claim status using the claim number</li>
-                                            <li>Updates sent via WhatsApp to {selectedMember.whatsapp}</li>
+                                            <li>Updates sent via WhatsApp to {selectedMemberData.whatsapp}</li>
                                         </ul>
                                     </div>
 
